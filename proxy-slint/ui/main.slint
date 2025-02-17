@@ -24,15 +24,20 @@ export struct RequestRecord {
     status: int,
 }
 
+export global ProxyState {
+    in-out property <string> host: "127.0.0.1";
+    in-out property <string> port: "8100";
+}
+
 export component MainWindow {
     callback start_proxy(string, int);  // host, port
     callback stop_proxy();
     callback install_certificate();
     
     in property <bool> proxy_running: false;
-    property <string> host: "127.0.0.1";
-    property <string> port: "8100";
     in-out property <[RequestRecord]> requests;
+    in-out property <string> host: "127.0.0.1";
+    in-out property <string> port: "8100";
 
     VerticalBox {
         // 标题栏
@@ -63,12 +68,12 @@ export component MainWindow {
                     VerticalBox {
                         LineEdit {
                             placeholder-text: "Host";
-                            text <=> root.host;
+                            text <=> ProxyState.host;
                         }
 
                         LineEdit {
                             placeholder-text: "Port";
-                            text <=> root.port;
+                            text <=> ProxyState.port;
                         }
 
                         Button {
@@ -77,7 +82,7 @@ export component MainWindow {
                                 if (proxy_running) {
                                     stop_proxy();
                                 } else {
-                                    start_proxy(root.host, round(root.port.to-float()));
+                                    start_proxy(ProxyState.host, round(ProxyState.port.to-float()));
                                 }
                             }
                         }

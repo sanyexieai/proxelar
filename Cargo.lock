@@ -4811,7 +4811,9 @@ dependencies = [
 name = "proxy-slint"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "proxyapi",
+ "serde",
  "slint",
  "slint-build",
  "tokio",

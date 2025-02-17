@@ -7,8 +7,11 @@ use proxy::ProxyController;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use slint::ComponentHandle;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
-// 确保 ui 文件在正确位置：proxy-slint/ui/main.slint
+static PROXY_HOST: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("127.0.0.1".to_string()));
+static PROXY_PORT: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("8100".to_string()));
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
@@ -79,16 +82,33 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
-    // 添加证书安装处理
+    // 修改证书安装处理
+    let proxy_weak = proxy_controller.clone();
     let window_weak = main_window.as_weak();
     main_window.on_install_certificate(move || {
         println!("Installing certificate...");
+        let proxy = proxy_weak.clone();
         let window = window_weak.clone();
         
         tokio::spawn(async move {
+            // 1. 先停止代理
+            let mut proxy = proxy.lock().await;
+            let _ = proxy.stop().await;
+            if let Some(window) = window.upgrade() {
+                window.set_proxy_running(false);
+            }
+
+            // 2. 安装证书
             match proxyapi::ca::Ssl::install_certificate().await {
                 Ok(()) => {
                     println!("Certificate installed successfully");
+                    #[cfg(target_os = "windows")]
+                    println!("If automatic installation failed, please manually install the certificate from: %APPDATA%\\proxelar\\ca.crt");
+                    #[cfg(target_os = "macos")]
+                    println!("If automatic installation failed, please manually install the certificate from: ~/Library/Application Support/proxelar/ca.crt");
+                    #[cfg(target_os = "linux")]
+                    println!("If automatic installation failed, please manually install the certificate from: ~/.local/share/proxelar/ca.crt");
+                    println!("Please restart your browser after installing the certificate");
                 }
                 Err(e) => {
                     println!("Failed to install certificate: {}", e);
