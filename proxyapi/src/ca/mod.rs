@@ -100,6 +100,11 @@ impl Ssl {
         let x509 = x509_builder.build();
         Ok(rustls::Certificate(x509.to_der()?))
     }
+
+    pub async fn install_certificate() -> Result<(), Box<dyn std::error::Error>> {
+        // 实现证书安装逻辑
+        Ok(())
+    }
 }
 
 #[async_trait]

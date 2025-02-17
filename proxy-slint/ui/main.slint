@@ -1,0 +1,132 @@
+import { Button, VerticalBox, LineEdit, ComboBox, ListView } from "std-widgets.slint";
+
+component SettingsGroup {
+    in property <string> title;
+    in property <length> spacing: 10px;
+    in property <bool> proxy-running: false;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: root.spacing;
+
+        Text {
+            text: root.title;
+            font-weight: 600;
+        }
+
+        @children
+    }
+}
+
+export struct RequestRecord {
+    method: string,
+    url: string,
+    status: int,
+}
+
+export component MainWindow {
+    callback start_proxy(string, int);  // host, port
+    callback stop_proxy();
+    callback install_certificate();
+    
+    in property <bool> proxy_running: false;
+    property <string> host: "127.0.0.1";
+    property <string> port: "8100";
+    in-out property <[RequestRecord]> requests;
+
+    VerticalBox {
+        // 标题栏
+        Rectangle {
+            height: 40px;
+            background: #2c2c2c;
+            Text {
+                text: "Proxy App";
+                color: white;
+                font-size: 16px;
+                x: 10px;
+                y: parent.height / 2 - self.height / 2;
+            }
+        }
+
+        // 主界面
+        HorizontalLayout {
+            padding: 20px;
+            spacing: 10px;
+
+            VerticalBox {
+                spacing: 10px;
+                
+                // 代理配置
+                SettingsGroup {
+                    title: "Proxy Settings";
+                    
+                    VerticalBox {
+                        LineEdit {
+                            placeholder-text: "Host";
+                            text <=> root.host;
+                        }
+
+                        LineEdit {
+                            placeholder-text: "Port";
+                            text <=> root.port;
+                        }
+
+                        Button {
+                            text: proxy_running ? "Stop Proxy" : "Start Proxy";
+                            clicked => {
+                                if (proxy_running) {
+                                    stop_proxy();
+                                } else {
+                                    start_proxy(root.host, round(root.port.to-float()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 证书管理
+                SettingsGroup {
+                    title: "Certificate";
+                    
+                    VerticalBox {
+                        Button {
+                            text: "Install Certificate";
+                            clicked => {
+                                install_certificate();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 请求列表区域
+        Rectangle {
+            background: white;
+            visible: proxy_running;
+            VerticalBox {
+                padding: 10px;
+                spacing: 5px;
+
+                Text {
+                    text: "Requests (" + requests.length + ")";
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                
+                ListView {
+                    min-height: 200px;
+                    for request in requests: Rectangle {
+                        height: 40px;
+                        background: #f5f5f5;
+                        VerticalBox {
+                            padding: 5px;
+                            Text { text: "\{request.method} \{request.url}"; }
+                            Text { text: "Status: \{request.status}"; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+} 
