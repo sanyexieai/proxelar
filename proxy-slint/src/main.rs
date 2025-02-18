@@ -3,7 +3,7 @@ slint::slint! {
 }
 
 mod proxy;
-use proxy::ProxyController;
+use proxy::{ProxyController, get_system_proxy, set_system_proxy, clear_system_proxy};
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use slint::ComponentHandle;
@@ -12,6 +12,9 @@ use std::sync::Mutex;
 
 static PROXY_HOST: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("127.0.0.1".to_string()));
 static PROXY_PORT: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("8100".to_string()));
+
+// 添加新的静态变量来存储原始代理设置
+static ORIGINAL_PROXY: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
@@ -33,7 +36,18 @@ async fn main() -> Result<(), slint::PlatformError> {
         let proxy = proxy_weak.clone();
         let window = window_weak.clone();
         
+        // 立即更新按钮状态
+        if let Some(window) = window.upgrade() {
+            window.set_proxy_running(true);
+        }
+        
         tokio::spawn(async move {
+            // 保存当前系统代理设置
+            if let Ok(current_proxy) = get_system_proxy() {
+                let mut original_proxy = ORIGINAL_PROXY.lock().unwrap();
+                *original_proxy = Some(current_proxy);
+            }
+
             let addr = match IpAddr::from_str(&host.to_string()) {
                 Ok(ip) => ip,
                 Err(e) => {
@@ -45,25 +59,30 @@ async fn main() -> Result<(), slint::PlatformError> {
             let socket_addr = SocketAddr::new(addr, port as u16);
             println!("Attempting to start proxy on {}", socket_addr);
             
+            // 设置系统代理
+            if let Err(e) = set_system_proxy(&format!("{}:{}", host, port)) {
+                println!("Failed to set system proxy: {}", e);
+                if let Some(window) = window.upgrade() {
+                    window.set_proxy_running(false);
+                }
+                return;
+            }
+            
             let mut proxy = proxy.lock().await;
-            match proxy.start(socket_addr).await {
-                Ok(()) => {
-                    println!("Proxy started successfully");
-                    if let Some(window) = window.upgrade() {
-                        window.set_proxy_running(true);
-                    }
-                },
-                Err(e) => {
-                    println!("Failed to start proxy: {}", e);
-                    if let Some(window) = window.upgrade() {
-                        window.set_proxy_running(false);
-                    }
+            if let Err(e) = proxy.start(socket_addr).await {
+                println!("Failed to start proxy: {}", e);
+                if let Some(window) = window.upgrade() {
+                    window.set_proxy_running(false);
+                }
+                // 如果启动失败，清除代理设置
+                if let Err(e) = clear_system_proxy() {
+                    println!("Failed to clear system proxy: {}", e);
                 }
             }
         });
     });
 
-    // 添加停止代理处理
+    // 修改停止代理处理
     let proxy_weak = proxy_controller.clone();
     let window_weak = main_window.as_weak();
     main_window.on_stop_proxy(move || {
@@ -71,7 +90,21 @@ async fn main() -> Result<(), slint::PlatformError> {
         let proxy = proxy_weak.clone();
         let window = window_weak.clone();
         
+        // 在 spawn 之前获取代理设置
+        let proxy_setting = ORIGINAL_PROXY.lock().unwrap().clone();
+        
         tokio::spawn(async move {
+            // 使用已经克隆的值
+            if let Some(proxy_setting) = proxy_setting {
+                if let Err(e) = set_system_proxy(&proxy_setting) {
+                    println!("Failed to restore original proxy settings: {}", e);
+                }
+            } else {
+                if let Err(e) = clear_system_proxy() {
+                    println!("Failed to clear system proxy: {}", e);
+                }
+            }
+
             let mut proxy = proxy.lock().await;
             if let Err(e) = proxy.stop().await {
                 println!("Failed to stop proxy: {}", e);
