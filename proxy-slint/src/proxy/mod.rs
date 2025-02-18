@@ -18,6 +18,7 @@ pub struct ProxyController {
     tx: Option<SyncSender<ProxyHandler>>,
     running: Arc<AtomicBool>,
     addr: Option<SocketAddr>,
+    proxy: Option<Arc<Proxy>>,
 }
 
 impl ProxyController {
@@ -27,6 +28,7 @@ impl ProxyController {
             tx: Some(proxy_handler),
             running: Arc::new(AtomicBool::new(false)),
             addr: None,
+            proxy: None,
         }
     }
 
@@ -36,15 +38,15 @@ impl ProxyController {
 
     pub async fn start(&mut self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         self.addr = Some(addr);
+        let proxy = Arc::new(Proxy::new(addr, self.tx.clone()));
+        self.proxy = Some(Arc::clone(&proxy));
         
-        let proxy1 = Proxy::new(addr, self.tx.clone());
-        // let local_addr = SocketAddr::new(IpAddr::from_str("127.0.0.1").unwrap(), addr.port());
-        // let proxy2 = Proxy::new(local_addr, self.tx.clone());
-
-        tokio::try_join!(
-            proxy1.start(std::future::pending()),
-            // proxy2.start(std::future::pending())
-        )?;
+        let proxy_ref = Arc::clone(&proxy);
+        tokio::spawn(async move {
+            if let Err(e) = proxy_ref.start(std::future::pending()).await {
+                eprintln!("代理服务错误: {}", e);
+            }
+        });
 
         Ok(())
     }
@@ -52,12 +54,11 @@ impl ProxyController {
     pub async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.running.store(false, Ordering::SeqCst);
         
-        if let Some(addr) = self.addr {
-            let _ = tokio::net::TcpStream::connect(addr).await;
+        if let Some(proxy) = self.proxy.take() {
+            proxy.shutdown();
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-        
         Ok(())
     }
 }

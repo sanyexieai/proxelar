@@ -22,18 +22,24 @@ use hyper::{
 
 use hyper_rustls::HttpsConnectorBuilder;
 
+use tokio::sync::broadcast;
+
 pub struct Proxy {
     addr: SocketAddr,
     tx: Option<SyncSender<proxy_handler::ProxyHandler>>,
+    shutdown: broadcast::Sender<()>,
 }
 
 impl Proxy {
     pub fn new(addr: SocketAddr, tx: Option<SyncSender<proxy_handler::ProxyHandler>>) -> Self {
-        Self { addr, tx }
+        let (shutdown, _) = broadcast::channel(1);
+        Self { addr, tx, shutdown }
     }
 
-    pub async fn start<F: Future<Output = ()>>(self, signal: F) -> Result<(), Error> {
+    pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), Error> {
         let addr = self.addr;
+        let tx = self.tx.clone();
+        let mut shutdown_rx = self.shutdown.subscribe();
 
         let https = HttpsConnectorBuilder::new()
             .with_webpki_roots()
@@ -55,7 +61,8 @@ impl Proxy {
         let make_service = make_service_fn(move |conn: &AddrStream| {
             let client = client.clone();
             let ca = Arc::clone(&ssl);
-            let http_handler = proxy_handler::ProxyHandler::new(self.tx.clone().unwrap());
+            let tx = tx.clone();
+            let http_handler = proxy_handler::ProxyHandler::new(tx.unwrap());
             let websocket_connector = None;
             let remote_addr = conn.remote_addr();
             async move {
@@ -74,8 +81,14 @@ impl Proxy {
 
         server_builder
             .serve(make_service)
-            .with_graceful_shutdown(signal)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.recv().await;
+            })
             .await
             .map_err(Into::into)
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.shutdown.send(());
     }
 }

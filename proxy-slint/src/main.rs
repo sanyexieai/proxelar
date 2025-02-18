@@ -147,6 +147,7 @@ async fn main() -> Result<(), slint::PlatformError> {
         let proxy_setting = ORIGINAL_PROXY.lock().unwrap().clone();
         
         tokio::spawn(async move {
+            
             // 先停止代理服务
             let mut proxy = proxy.lock().await;
             if let Err(e) = proxy.stop().await {
