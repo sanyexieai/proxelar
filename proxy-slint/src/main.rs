@@ -9,26 +9,25 @@ use std::str::FromStr;
 use slint::ComponentHandle;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use std::sync::mpsc;
 
-static PROXY_HOST: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("127.0.0.1".to_string()));
-static PROXY_PORT: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("8100".to_string()));
 
 // 添加新的静态变量来存储原始代理设置
 static ORIGINAL_PROXY: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 fn is_port_available(port: u16) -> bool {
-    // 同时检查 TCP 和 UDP
-    let tcp_available = std::net::TcpListener::bind(("127.0.0.1", port)).is_ok();
-    let udp_available = std::net::UdpSocket::bind(("127.0.0.1", port)).is_ok();
+    // 同时检查 TCP 和 UDP，使用 0.0.0.0
+    let tcp_available = std::net::TcpListener::bind(("0.0.0.0", port)).is_ok();
+    let udp_available = std::net::UdpSocket::bind(("0.0.0.0", port)).is_ok();
     
     // 如果创建成功，立即释放
     if tcp_available {
-        if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+        if let Ok(listener) = std::net::TcpListener::bind(("0.0.0.0", port)) {
             drop(listener);
         }
     }
     if udp_available {
-        if let Ok(socket) = std::net::UdpSocket::bind(("127.0.0.1", port)) {
+        if let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", port)) {
             drop(socket);
         }
     }
@@ -38,8 +37,9 @@ fn is_port_available(port: u16) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
+    let (tx, _rx) = mpsc::sync_channel(100);
     let main_window = MainWindow::new()?;
-    let proxy_controller = std::sync::Arc::new(tokio::sync::Mutex::new(ProxyController::new()));
+    let proxy_controller = std::sync::Arc::new(tokio::sync::Mutex::new(ProxyController::new(tx)));
     
     // 设置 window
     {
@@ -98,19 +98,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                 *original_proxy = Some(current_proxy);
             }
 
-            let addr = match IpAddr::from_str(&host.to_string()) {
-                Ok(ip) => ip,
-                Err(e) => {
-                    println!("Invalid IP address: {}", e);
-                    IpAddr::from_str("127.0.0.1").unwrap()
-                }
-            };
-            
-            let socket_addr = SocketAddr::new(addr, port as u16);
-            println!("Attempting to start proxy on {}", socket_addr);
+            let addr = SocketAddr::new(IpAddr::from_str("0.0.0.0").unwrap(), port as u16);
+            println!("Attempting to start proxy on {}", addr);
             
             // 设置系统代理
-            if let Err(e) = set_system_proxy(&format!("{}:{}", host, port)) {
+            if let Err(e) = set_system_proxy(&format!("127.0.0.1:{}", port)) {
                 println!("Failed to set system proxy: {}", e);
                 if let Some(window) = window.upgrade() {
                     window.set_proxy_running(false);
@@ -119,7 +111,7 @@ async fn main() -> Result<(), slint::PlatformError> {
             }
             
             let mut proxy = proxy.lock().await;
-            match proxy.start(socket_addr).await {
+            match proxy.start(addr).await {
                 Ok(_) => {
                     println!("Proxy started successfully");
                     // 代理启动成功，保持按钮状态为 true

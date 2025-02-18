@@ -1,6 +1,6 @@
 mod error;
 pub mod proxy;
-mod proxy_handler;
+pub mod proxy_handler;
 mod rewind;
 
 pub mod ca;
