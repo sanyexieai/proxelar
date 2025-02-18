@@ -4,6 +4,8 @@ use crate::MainWindow;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 mod system_proxy;
 pub use system_proxy::{get_system_proxy, set_system_proxy, clear_system_proxy};
@@ -11,6 +13,8 @@ pub use system_proxy::{get_system_proxy, set_system_proxy, clear_system_proxy};
 pub struct ProxyController {
     window: Option<Weak<MainWindow>>,
     listener: Option<TcpListener>,
+    running: Arc<AtomicBool>,
+    addr: Option<SocketAddr>,
 }
 
 impl ProxyController {
@@ -18,6 +22,8 @@ impl ProxyController {
         Self {
             window: None,
             listener: None,
+            running: Arc::new(AtomicBool::new(false)),
+            addr: None,
         }
     }
 
@@ -26,18 +32,45 @@ impl ProxyController {
     }
 
     pub async fn start(&mut self, addr: SocketAddr) -> Result<(), Box<dyn Error>> {
-        if self.listener.is_some() {
-            return Ok(());
-        }
+        self.addr = Some(addr);
+        
+        self.stop().await?;
+        
+        let mut retry_count = 0;
+        let listener = loop {
+            match TcpListener::bind(addr).await {
+                Ok(listener) => break listener,
+                Err(e) => {
+                    if retry_count >= 3 {
+                        return Err(e.into());
+                    }
+                    retry_count += 1;
+                    println!("Failed to bind port, retrying ({}/3)...", retry_count);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                }
+            }
+        };
 
-        let listener = TcpListener::bind(addr).await?;
         let listener_handle = listener.into_std()?;
         let listener_handle2 = listener_handle.try_clone()?;
         let listener = TcpListener::from_std(listener_handle)?;
         
+        self.running.store(true, Ordering::SeqCst);
+        let running = self.running.clone();
+        
         tokio::spawn(async move {
-            while let Ok((inbound, _)) = listener.accept().await {
-                tokio::spawn(handle_connection(inbound));
+            while running.load(Ordering::SeqCst) {
+                match listener.accept().await {
+                    Ok((inbound, _)) => {
+                        tokio::spawn(handle_connection(inbound));
+                    }
+                    Err(e) => {
+                        if running.load(Ordering::SeqCst) {
+                            println!("Accept error: {}", e);
+                        }
+                        break;
+                    }
+                }
             }
         });
 
@@ -46,7 +79,18 @@ impl ProxyController {
     }
 
     pub async fn stop(&mut self) -> Result<(), Box<dyn Error>> {
-        self.listener = None;
+        self.running.store(false, Ordering::SeqCst);
+        
+        if let Some(listener) = self.listener.take() {
+            drop(listener);
+        }
+
+        if let Some(addr) = self.addr {
+            let _ = tokio::net::TcpStream::connect(addr).await;
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        
         Ok(())
     }
 }
