@@ -14,7 +14,6 @@ use openssl::{
     pkey::{PKey, Private},
     rand,
     x509::{extension::SubjectAlternativeName, X509Builder, X509NameBuilder, X509},
-    x509::extension::{BasicConstraints, KeyUsage, ExtendedKeyUsage},
 };
 use tokio_rustls::rustls::{self, ServerConfig};
 
@@ -41,20 +40,15 @@ impl Default for Ssl {
         let private_key_bytes: &[u8] = include_bytes!("proxelar.key");
         let ca_cert_bytes: &[u8] = include_bytes!("proxelar.cer");
 
-        println!("Loading root CA certificate and private key...");
-        
-        let pkey = PKey::private_key_from_pem(private_key_bytes)
-            .expect("Failed to parse private key");
+        let pkey =
+            PKey::private_key_from_pem(private_key_bytes).expect("Failed to parse private key");
 
         let private_key = rustls::PrivateKey(
             pkey.private_key_to_der()
                 .expect("Failed to encode private key"),
         );
 
-        let ca_cert = X509::from_pem(ca_cert_bytes)
-            .expect("Failed to parse CA certificate");
-
-        println!("Root CA certificate subject: {:?}", ca_cert.subject_name());
+        let ca_cert = X509::from_pem(ca_cert_bytes).expect("Failed to parse CA certificate");
 
         Self {
             pkey,
@@ -71,8 +65,6 @@ impl Default for Ssl {
 
 impl Ssl {
     fn gen_cert(&self, authority: &Authority) -> Result<rustls::Certificate, ErrorStack> {
-        println!("Generating certificate for domain: {}", authority.host());
-        
         let mut name_builder = X509NameBuilder::new()?;
         name_builder.append_entry_by_text("CN", authority.host())?;
         let name = name_builder.build();
@@ -90,22 +82,7 @@ impl Ssl {
         x509_builder.set_not_after(Asn1Time::from_unix(not_before + TTL_SECS)?.as_ref())?;
 
         x509_builder.set_pubkey(&self.pkey)?;
-        println!("Certificate issuer: {:?}", self.ca_cert.subject_name());
         x509_builder.set_issuer_name(self.ca_cert.subject_name())?;
-
-        let basic_constraints = BasicConstraints::new().critical().build()?;
-        x509_builder.append_extension(basic_constraints)?;
-
-        let key_usage = KeyUsage::new()
-            .digital_signature()
-            .key_encipherment()
-            .build()?;
-        x509_builder.append_extension(key_usage)?;
-
-        let extended_key_usage = ExtendedKeyUsage::new()
-            .server_auth()
-            .build()?;
-        x509_builder.append_extension(extended_key_usage)?;
 
         let alternative_name = SubjectAlternativeName::new()
             .dns(authority.host())
@@ -121,19 +98,7 @@ impl Ssl {
 
         x509_builder.sign(&self.pkey, self.hash)?;
         let x509 = x509_builder.build();
-        
-        println!("Certificate generated successfully");
         Ok(rustls::Certificate(x509.to_der()?))
-    }
-
-    pub fn clear_cache(&self) {
-        self.cache.invalidate_all();
-        println!("Server config cache cleared");
-    }
-
-    pub async fn install_certificate() -> Result<(), Box<dyn std::error::Error>> {
-        // 实现证书安装逻辑
-        Ok(())
     }
 }
 
@@ -144,18 +109,16 @@ impl CertificateAuthority for Ssl {
             println!("Using cached server config");
             return server_cfg;
         }
-        println!("Using trusted certificate for {}", authority);
+        println!("Generating server config");
 
-        // 直接使用已经信任的证书
-        let cert = rustls::Certificate(
-            self.ca_cert.to_der()
-                .expect("Failed to encode certificate")
-        );
+        let certs = vec![self
+            .gen_cert(authority)
+            .unwrap_or_else(|_| panic!("Failed to generate certificate for {}", authority))];
 
         let mut server_cfg = ServerConfig::builder()
             .with_safe_defaults()
             .with_no_client_auth()
-            .with_single_cert(vec![cert], self.private_key.clone())
+            .with_single_cert(certs, self.private_key.clone())
             .expect("Failed to build ServerConfig");
 
         server_cfg.alpn_protocols = vec![
@@ -165,6 +128,7 @@ impl CertificateAuthority for Ssl {
         ];
 
         let server_cfg = Arc::new(server_cfg);
+
         self.cache
             .insert(authority.clone(), Arc::clone(&server_cfg))
             .await;

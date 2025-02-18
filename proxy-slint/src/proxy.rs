@@ -53,6 +53,7 @@ impl ProxyServer {
 pub struct ProxyController {
     server: Option<(tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>)>,
     window: Option<Weak<MainWindow>>,
+    ca: Option<Ssl>,
 }
 
 impl ProxyController {
@@ -60,6 +61,7 @@ impl ProxyController {
         Self { 
             server: None,
             window: None,
+            ca: Some(Ssl::default()),
         }
     }
 
@@ -69,8 +71,6 @@ impl ProxyController {
 
     pub async fn start(&mut self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         println!("Starting proxy server on {}", addr);
-        let ca = Ssl::default();
-        ca.clear_cache();
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let server = Proxy::new(addr, Some(tx.clone()));
         

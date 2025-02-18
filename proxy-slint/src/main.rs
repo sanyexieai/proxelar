@@ -91,29 +91,29 @@ async fn main() -> Result<(), slint::PlatformError> {
         let window = window_weak.clone();
         
         tokio::spawn(async move {
-            // 1. 先停止代理
-            let mut proxy = proxy.lock().await;
-            let _ = proxy.stop().await;
-            if let Some(window) = window.upgrade() {
-                window.set_proxy_running(false);
-            }
+            // // 1. 先停止代理
+            // let mut proxy = proxy.lock().await;
+            // let _ = proxy.stop().await;
+            // if let Some(window) = window.upgrade() {
+            //     window.set_proxy_running(false);
+            // }
 
-            // 2. 安装证书
-            match proxyapi::ca::Ssl::install_certificate().await {
-                Ok(()) => {
-                    println!("Certificate installed successfully");
-                    #[cfg(target_os = "windows")]
-                    println!("If automatic installation failed, please manually install the certificate from: %APPDATA%\\proxelar\\ca.crt");
-                    #[cfg(target_os = "macos")]
-                    println!("If automatic installation failed, please manually install the certificate from: ~/Library/Application Support/proxelar/ca.crt");
-                    #[cfg(target_os = "linux")]
-                    println!("If automatic installation failed, please manually install the certificate from: ~/.local/share/proxelar/ca.crt");
-                    println!("Please restart your browser after installing the certificate");
-                }
-                Err(e) => {
-                    println!("Failed to install certificate: {}", e);
-                }
-            }
+            // // 2. 安装证书
+            // match proxyapi::ca::Ssl::install_certificate().await {
+            //     Ok(()) => {
+            //         println!("Certificate installed successfully");
+            //         #[cfg(target_os = "windows")]
+            //         println!("If automatic installation failed, please manually install the certificate from: %APPDATA%\\proxelar\\ca.crt");
+            //         #[cfg(target_os = "macos")]
+            //         println!("If automatic installation failed, please manually install the certificate from: ~/Library/Application Support/proxelar/ca.crt");
+            //         #[cfg(target_os = "linux")]
+            //         println!("If automatic installation failed, please manually install the certificate from: ~/.local/share/proxelar/ca.crt");
+            //         println!("Please restart your browser after installing the certificate");
+            //     }
+            //     Err(e) => {
+            //         println!("Failed to install certificate: {}", e);
+            //     }
+            // }
         });
     });
 
