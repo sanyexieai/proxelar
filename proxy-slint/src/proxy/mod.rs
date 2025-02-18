@@ -1,7 +1,8 @@
 use std::{
     convert::Infallible,
-    net::SocketAddr,
+    net::{SocketAddr, IpAddr},
     sync::{mpsc::SyncSender, Arc},
+    str::FromStr,
 };
 
 use proxyapi::{Proxy, proxy_handler::ProxyHandler};
@@ -35,8 +36,16 @@ impl ProxyController {
 
     pub async fn start(&mut self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         self.addr = Some(addr);
-        let proxy = proxyapi::proxy::Proxy::new(addr, self.tx.clone());
-        proxy.start(std::future::pending()).await?;
+        
+        let proxy1 = Proxy::new(addr, self.tx.clone());
+        // let local_addr = SocketAddr::new(IpAddr::from_str("127.0.0.1").unwrap(), addr.port());
+        // let proxy2 = Proxy::new(local_addr, self.tx.clone());
+
+        tokio::try_join!(
+            proxy1.start(std::future::pending()),
+            // proxy2.start(std::future::pending())
+        )?;
+
         Ok(())
     }
 
